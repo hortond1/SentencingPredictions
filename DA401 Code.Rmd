@@ -1,0 +1,596 @@
+---
+title: "Predicting Criminal Sentencing"
+author: "Drake Horton"
+date: "9/11/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# Reading in libraries
+#install.packages('tidyverse')
+
+library(tidyverse)
+library(caret)
+library(knitr)
+library(haven)
+library(readr)
+library(rpart.plot)
+```
+
+```{r}
+# Reading in data and renaming wierd column names
+
+supplement2014 <- read.csv("C:/Users/drake/Documents/Denison University/4. Senior Year/First Semester/Seminar in Data Analytics/Data/USSC_SUP_FY14.csv")
+supplement2014 <- rename(supplement2014, 'USSCIDN' = 'ï..USSCIDN')
+
+supplement2015 <- read.csv("C:/Users/drake/Documents/Denison University/4. Senior Year/First Semester/Seminar in Data Analytics/Data/USSC_SUP_FY15.csv")
+supplement2015 <- rename(supplement2015, 'USSCIDN' = 'ï..USSCIDN')
+
+supplement2016 <- read.csv("C:/Users/drake/Documents/Denison University/4. Senior Year/First Semester/Seminar in Data Analytics/Data/USSC_SUP_FY16.csv")
+supplement2016 <- rename(supplement2016, 'USSCIDN' = 'ï..USSCIDN')
+
+supplement2017 <- read.csv("C:/Users/drake/Documents/Denison University/4. Senior Year/First Semester/Seminar in Data Analytics/Data/USSC_SUP_FY17.csv")
+supplement2017 <- rename(supplement2017, 'USSCIDN' = 'ï..USSCIDN')
+
+data2014 <- read.csv("C:/Users/drake/Documents/Denison University/4. Senior Year/First Semester/Seminar in Data Analytics/Data/2014DataNew.csv")
+data2014 <- rename(data2014, 'AMTFINEC' = 'ï..AMTFINEC')
+
+data2015 <- read.csv("C:/Users/drake/Documents/Denison University/4. Senior Year/First Semester/Seminar in Data Analytics/Data/2015DataNew.csv")
+data2015 <- rename(data2015, 'AMTFINEC' = 'ï..AMTFINEC')
+
+data2016 <- read.csv("C:/Users/drake/Documents/Denison University/4. Senior Year/First Semester/Seminar in Data Analytics/Data/2016DataNew.csv")
+data2016 <- rename(data2016, 'AMTFINEC' = 'ï..AMTFINEC')
+
+data2017 <- read.csv("C:/Users/drake/Documents/Denison University/4. Senior Year/First Semester/Seminar in Data Analytics/Data/2017DataNew.csv")
+data2017 <- rename(data2017, 'AMTFINEC' = 'ï..AMTFINEC')
+```
+
+```{r}
+# Merging supplement data
+
+fulldata2014 <- merge(data2014,supplement2014, by = 'USSCIDN') # 60 variables
+fulldata2015 <- merge(data2015,supplement2015, by = 'USSCIDN') # 66 Variables
+fulldata2016 <- merge(data2016,supplement2016, by = 'USSCIDN') # 60 variables
+fulldata2017 <- merge(data2017,supplement2017, by = 'USSCIDN') # 65 variables
+
+# Difference between data frames is the drugtype columns, code below will clean this in order to merge all of the data together
+
+summary(fulldata2014$DRUGTYP1)
+75836 - 50200 # 25636 cases w/ drugs
+summary(fulldata2014$DRUGTYP2)
+75836 - 71788 # 4048 cases w/ 2 drugs
+summary(fulldata2014$DRUGTYP3)
+75836 - 74749 # 1087 cases w/ 3 drugs
+summary(fulldata2014$DRUGTYP4)
+75836 - 75522 # 314 cases w/ 4 drugs
+314 / 25636 # 1% of cases have 4 or more drugs in 2014
+
+summary(fulldata2015$DRUGTYP1)
+71003 - 46674 # 24329 cases w/ drugs
+summary(fulldata2015$DRUGTYP2)
+71003 - 66808 # 4195 cases w/ 2 drugs
+summary(fulldata2015$DRUGTYP3)
+71003 - 69757 # 1246 cases w/ 3 drugs
+summary(fulldata2015$DRUGTYP4)
+71003 - 70601 # 402 cases w/ 4 drugs
+402 / 24329 # 1% of cases have 4 or more drugs in 2015
+
+summary(fulldata2016$DRUGTYP1)
+67742 - 44598 # 23144 cases w/ drugs
+summary(fulldata2016$DRUGTYP2)
+67742 - 63531 # 4211 cases w/ 2 drugs
+summary(fulldata2016$DRUGTYP3)
+67742 - 66449 # 1293 cases w/ 3 drugs
+summary(fulldata2016$DRUGTYP4)
+67742 - 67337 # 405 cases w/ 4 drugs
+405 / 23144 # 1% of cases have 4 or more drugs in 2016
+
+summary(fulldata2017$DRUGTYP1)
+66873 - 44311 # 22562 cases w/ drugs
+summary(fulldata2017$DRUGTYP2)
+66873 - 62409 # 4464 cases w/ 2 drugs
+summary(fulldata2017$DRUGTYP3)
+66873 - 65341 # 1532 cases w/ 3 drugs
+summary(fulldata2017$DRUGTYP4)
+66873 - 66352 # 521 cases w/ 4 drugs
+521 / 22562 # 2% of cases have 4 or more drugs in 2017
+
+# Going to focus on drugtype 1-5 since less than 1% have over 5 drugs
+
+fulldata2014 <- fulldata2014[-c(48:52)]
+fulldata2015 <- fulldata2015[-c(48:58)]
+fulldata2016 <- fulldata2016[-c(48:52)]
+fulldata2017 <- fulldata2017[-c(48:57)]
+
+fulldata2014 <- fulldata2014[ ,order(names(fulldata2014))]
+fulldata2015 <- fulldata2015[ ,order(names(fulldata2015))]
+fulldata2016 <- fulldata2016[ ,order(names(fulldata2016))]
+fulldata2017 <- fulldata2017[ ,order(names(fulldata2017))]
+
+fulldata <- rbind(fulldata2014,fulldata2015)
+fulldata <- rbind(fulldata, fulldata2016)
+fulldata <- rbind(fulldata, fulldata2017)
+
+length(unique(fulldata$USSCIDN)) # 281433 unique sentence IDs
+281454 - 281433 # 21 repeats
+frequencycount <- as.data.frame(table(fulldata$USSCIDN))
+fulldata <- distinct(fulldata, USSCIDN, .keep_all = TRUE)
+frequencycount <- as.data.frame(table(fulldata$USSCIDN))
+
+rm(supplement2014)
+rm(supplement2015)
+rm(supplement2016)
+rm(supplement2017)
+rm(data2014)
+rm(data2015)
+rm(data2016)
+rm(data2017)
+rm(frequencycount)
+```
+
+
+```{r}
+# Creating Useful Datasets
+
+drugpos <- filter(fulldata, OFFGUIDE == 9) # 7791 sentences
+drugtraf <- filter(fulldata, OFFGUIDE == 10) # 81581 sentences
+drugdata <- filter(fulldata, OFFGUIDE == 9 | OFFGUIDE == 10) # 89372 sentences
+
+immigration <- filter(fulldata, OFFGUIDE == 17)
+his <- filter(fulldata, HISPORIG == 2)
+hisblack <- filter(fulldata, MONRACE == 2 & HISPORIG == 2)
+firearms <- filter(fulldata, OFFGUIDE == 13)
+theft <- filter(fulldata, OFFGUIDE == 16)
+whitedrug <- filter(drugdata, NEWRACE == 1)
+blackdrug <- filter(drugdata, NEWRACE == 2)
+wbdrug <- rbind(whitedrug,blackdrug)
+```
+
+```{r}
+# Data Exploration
+
+summary(fulldata$TOTPRISN) # Average is 62 months which is around 5 years
+summary(fulldata$TOTDAYS) # Average is 2 days
+summary(drugdata$TOTPRISN) # Average is 75 months which is around 6 years
+table(fulldata$PRISDUM) # only 29,000 people did not get a prison sentence
+
+offguide <- as.data.frame(table(fulldata$OFFGUIDE)) # 10, 13, 16, 17 are most common offenses
+# 10 - Drug Trafficking
+# 13 - Firearms
+# 16 - Fraud/Theft/Embezzlement 
+# 17 - Immigration
+
+table(fulldata$NEWRACE) # 62841 white, 56241 black, 145820 hispanic, 11355 other
+62841 / 281433 # 22% of sentences are white
+56241 / 281433 # 20% of sentences are black
+145820 / 281433 # 51% of sentences are hispanic
+table(drugdata$NEWRACE)
+19686 / 89372 # 22% of drug sentences are white
+20388 / 89372 # 22% of drug sentences are black
+45889 / 89372 # 51 % of drug sentences are hispanic
+table(immigration$NEWRACE)
+78741 / 83825 # 93% of immigration sentences are hispanic
+78741 / 145820 # Over 50% of those with hispanic origin have immigration sentences
+table(theft$NEWRACE) # Majority White and Black
+table(firearms$NEWRACE) # Majority Black
+table(drugpos$NEWRACE) # Majority hispanic
+summary(drugdata$AGE) # 34 years is the average age for drug crimes
+summary(drugdata$MONSEX) # Vast majority is male
+summary(drugdata$MNTHDEPT) # usually 41 months more than the guideline minimum sentences
+summary(whitedrug$MNTHDEPT)
+summary(blackdrug$MNTHDEPT)
+summary(whitedrug$PCNTDEPT)
+summary(blackdrug$PCNTDEPT)
+districts <- as.data.frame(table(drugdata$DISTRICT))
+countries <- as.data.frame(table(drugdata$CITWHERE))
+```
+
+```{r}
+# Variable Creation
+
+drugdata$DRUGTYP1[is.na(drugdata$DRUGTYP1)] <- 0
+drugdata$DRUGTYP2[is.na(drugdata$DRUGTYP2)] <- 0
+drugdata$DRUGTYP3[is.na(drugdata$DRUGTYP3)] <- 0
+drugdata$DRUGTYP4[is.na(drugdata$DRUGTYP4)] <- 0
+drugdata$DRUGTYP5[is.na(drugdata$DRUGTYP5)] <- 0
+
+MARIJ1 <- ifelse(drugdata$DRUGTYP1 == 4, yes = 1, no = 0)
+MARIJ2 <- ifelse(drugdata$DRUGTYP2 == 4, yes = 1, no = 0)
+MARIJ3 <- ifelse(drugdata$DRUGTYP3 == 4, yes = 1, no = 0)
+MARIJ4 <- ifelse(drugdata$DRUGTYP4 == 4, yes = 1, no = 0)
+MARIJ5 <- ifelse(drugdata$DRUGTYP5 == 4, yes = 1, no = 0)
+MARIJ <- MARIJ1 + MARIJ2 + MARIJ3 + MARIJ4 + MARIJ5
+drugdata$MARIJ <- MARIJ
+
+COCAINE1 <- ifelse(drugdata$DRUGTYP1 == 1, yes = 1, no = 0)
+COCAINE2 <- ifelse(drugdata$DRUGTYP2 == 1, yes = 1, no = 0)
+COCAINE3 <- ifelse(drugdata$DRUGTYP3 == 1, yes = 1, no = 0)
+COCAINE4 <- ifelse(drugdata$DRUGTYP4 == 1, yes = 1, no = 0)
+COCAINE5 <- ifelse(drugdata$DRUGTYP5 == 1, yes = 1, no = 0)
+COCAINE <- COCAINE1 + COCAINE2 + COCAINE3 + COCAINE4 + COCAINE5
+drugdata$COCAINE <- COCAINE
+
+HEROIN1 <- ifelse(drugdata$DRUGTYP1 == 3, yes = 1, no = 0)
+HEROIN2 <- ifelse(drugdata$DRUGTYP2 == 3, yes = 1, no = 0)
+HEROIN3 <- ifelse(drugdata$DRUGTYP3 == 3, yes = 1, no = 0)
+HEROIN4 <- ifelse(drugdata$DRUGTYP4 == 3, yes = 1, no = 0)
+HEROIN5 <- ifelse(drugdata$DRUGTYP5 == 3, yes = 1, no = 0)
+HEROIN <- HEROIN1 + HEROIN2 + HEROIN3 + HEROIN4 + HEROIN5
+drugdata$HEROIN <- HEROIN
+
+CRACK1 <- ifelse(drugdata$DRUGTYP1 == 2, yes = 1, no = 0)
+CRACK2 <- ifelse(drugdata$DRUGTYP2 == 2, yes = 1, no = 0)
+CRACK3 <- ifelse(drugdata$DRUGTYP3 == 2, yes = 1, no = 0)
+CRACK4 <- ifelse(drugdata$DRUGTYP4 == 2, yes = 1, no = 0)
+CRACK5 <- ifelse(drugdata$DRUGTYP5 == 2, yes = 1, no = 0)
+CRACK <- CRACK1 + CRACK2 + CRACK3 + CRACK4 + CRACK5
+drugdata$CRACK <- CRACK
+
+WHITE <- ifelse(drugdata$NEWRACE == 1, yes = 1, no = 0)
+drugdata$WHITE <- WHITE
+
+BLACK <- ifelse(drugdata$NEWRACE == 2, yes = 1, no = 0)
+drugdata$BLACK <- BLACK
+
+HISPAN <- ifelse(drugdata$NEWRACE == 3, yes = 1, no = 0)
+drugdata$HISPAN <- HISPAN
+
+CITIZEN <- ifelse(drugdata$CITIZEN == 1 | drugdata$CITIZEN == 2, yes = 1, no = 0)
+drugdata$USCITIZEN <- CITIZEN
+
+JURY <- ifelse(drugdata$DISPOSIT == 3, yes = 1, no = 0)
+drugdata$JURY <- JURY
+
+JUDGE <- ifelse(drugdata$DISPOSIT == 4, yes = 1, no = 0)
+drugdata$JUDGE <- JUDGE
+
+MEXICO <- ifelse(drugdata$CITWHERE == 49, yes = 1, no = 0)
+drugdata$MEXICO<- MEXICO
+
+SBORDER <- ifelse(drugdata$DISTRICT == 70 | drugdata$DISTRICT == 42 | drugdata$DISTRICT == 74 | drugdata$DISTRICT == 41 | drugdata$DISTRICT == 84 | drugdata$DISTRICT == 39 | drugdata$DISTRICT == 40, yes = 1, no = 0)
+drugdata$SBORDER <- SBORDER
+
+HS <- ifelse(drugdata$NEWEDUC == 3, yes = 1, no = 0)
+drugdata$HS <- HS
+
+SOMECOL <- ifelse(drugdata$NEWEDUC == 5, yes = 1, no = 0)
+drugdata$SOMECOL <- SOMECOL
+
+COLGRAD <- ifelse(drugdata$NEWEDUC == 6, yes = 1, no = 0)
+drugdata$COLGRAD <- COLGRAD
+
+BAIL <- ifelse(drugdata$PRESENT == 2, yes = 1, no = 0)
+drugdata$BAIL <- BAIL
+
+ONLYMARIJ <- ifelse(drugdata$DRUGTYP1 == 4 & drugdata$DRUGTYP2 == 0, yes = 1, no = 0)
+drugdata$ONLYMARIJ <- ONLYMARIJ
+
+rm(COCAINE1, COCAINE2, COCAINE3, COCAINE4, COCAINE5, COCAINE, HEROIN1, HEROIN2, HEROIN3, HEROIN4, HEROIN5, HEROIN, MARIJ1, MARIJ2, MARIJ3, MARIJ4, MARIJ5, MARIJ, CRACK, CRACK1, CRACK2, CRACK3, CRACK4, CRACK5, BAIL, BLACK, CITIZEN, COLGRAD, HISPAN, HS, JUDGE, JURY, MEXICO, SBORDER, SOMECOL, WHITE, ONLYMARIJ)
+```
+
+```{r}
+# Visual showing the amount of sentences per year
+
+df2005 <- read.csv("C:/Users/drake/Documents/Denison University/4. Senior Year/First Semester/Seminar in Data Analytics/SASUniversityEdition/myfolders/2005.csv")
+df2005 <- rename(df2005, 'USSCIDN' = 'ï..USSCIDN')
+df2006 <- read.csv("C:/Users/drake/Documents/Denison University/4. Senior Year/First Semester/Seminar in Data Analytics/SASUniversityEdition/myfolders/2006.csv")
+df2006 <- rename(df2006, 'USSCIDN' = 'ï..USSCIDN')
+df2007 <- read.csv("C:/Users/drake/Documents/Denison University/4. Senior Year/First Semester/Seminar in Data Analytics/SASUniversityEdition/myfolders/2007.csv")
+df2007 <- rename(df2007, 'USSCIDN' = 'ï..USSCIDN')
+df2008 <- read.csv("C:/Users/drake/Documents/Denison University/4. Senior Year/First Semester/Seminar in Data Analytics/SASUniversityEdition/myfolders/2008.csv")
+df2008 <- rename(df2008, 'USSCIDN' = 'ï..USSCIDN')
+df2009 <- read.csv("C:/Users/drake/Documents/Denison University/4. Senior Year/First Semester/Seminar in Data Analytics/SASUniversityEdition/myfolders/2009.csv")
+df2009 <- rename(df2009, 'USSCIDN' = 'ï..USSCIDN')
+df2010 <- read.csv("C:/Users/drake/Documents/Denison University/4. Senior Year/First Semester/Seminar in Data Analytics/SASUniversityEdition/myfolders/2010.csv")
+df2010 <- rename(df2010, 'USSCIDN' = 'ï..usscidn', 'SENTYR' = 'sentyr')
+df2011 <- read.csv("C:/Users/drake/Documents/Denison University/4. Senior Year/First Semester/Seminar in Data Analytics/SASUniversityEdition/myfolders/2011.csv")
+df2011 <- rename(df2011, 'USSCIDN' = 'ï..USSCIDN')
+df2012 <- read.csv("C:/Users/drake/Documents/Denison University/4. Senior Year/First Semester/Seminar in Data Analytics/SASUniversityEdition/myfolders/2012.csv")
+df2012 <- rename(df2012, 'USSCIDN' = 'ï..USSCIDN')
+df2013 <- read.csv("C:/Users/drake/Documents/Denison University/4. Senior Year/First Semester/Seminar in Data Analytics/SASUniversityEdition/myfolders/2013.csv")
+df2013 <- rename(df2013, 'USSCIDN' = 'ï..USSCIDN')
+df2018 <- read.csv("C:/Users/drake/Documents/Denison University/4. Senior Year/First Semester/Seminar in Data Analytics/SASUniversityEdition/myfolders/2018.csv")
+df2018 <- rename(df2018, 'USSCIDN' = 'ï..USSCIDN')
+df2019 <- read.csv("C:/Users/drake/Documents/Denison University/4. Senior Year/First Semester/Seminar in Data Analytics/SASUniversityEdition/myfolders/2019.csv")
+df2019 <- rename(df2019, 'USSCIDN' = 'ï..USSCIDN')
+df14151617 <- fulldata[c(49,56)]
+
+
+yearlycount <- rbind(df2005, df2006, df2007, df2008, df2009, df2010, df2011, df2012, df2013, df14151617, df2018, df2019)
+yearlycount <- distinct(yearlycount, USSCIDN, .keep_all = TRUE)
+length(unique(yearlycount$USSCIDN))
+sentyears <- as.data.frame(table(yearlycount$SENTYR))
+
+
+ggplot(data = sentyears[2:15,], aes(x=Var1,y=Freq, group = 1))+
+  geom_line()+
+  geom_point(color='red')+
+  xlab('Year')+
+  ylab('# of Sentences')+
+  ggtitle('Number of Sentences per Year')+
+  theme(plot.title = element_text(hjust = 0.5))
+
+rm(df2005,df2006,df2007,df2008,df2009,df2010,df2011,df2012,df2013,df2018,df2019,df14151617,yearlycount)
+
+# Visual of drug offenses
+
+drugdatafreq <- as.data.frame(table(drugdata$SENTYR))
+ggplot(data = drugdatafreq[2:5,], aes(x=Var1,y=Freq, group = 1))+
+  geom_line()+
+  geom_point(color='red')+
+  xlab('Year')+
+  ylab('# of Sentences')+
+  ggtitle('Number of Drug Sentences per Year')+
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Visual of differences in sentence and guideline minimums
+
+boxplot(MNTHDEPT ~ NEWRACE, data = wbdrug)
+
+hist(modeldata$TOTPRISN)
+```
+
+```{r}
+# Creating model datasets
+
+modeldata <- drugdata[c(1:2,8:13,16,32:33,35:36,39:40,42,46,49,53,56:74)]
+modeldata$TOTPRISN[modeldata$TOTPRISN>1200] <- NA
+modeldata <- na.exclude(modeldata)
+set.seed(1)
+part = createDataPartition(modeldata$TOTPRISN, p = 0.7, list=FALSE)
+train = modeldata[part,]
+test = modeldata[-part,]
+```
+
+```{r}
+# Linear Regression Model Code
+
+# Linear Model
+lin_model = train(TOTPRISN ~ ACCAP + CAROFFAP + CRIMHIST + NODRUG + NUMDEPEN + XFOLSOR + MARIJ + HEROIN + WHITE + BLACK + HISPAN + USCITIZEN + JURY + JUDGE + MEXICO + HS + SOMECOL + COLGRAD + BAIL + SENTYR, 
+                 data = train, 
+                 method = "lm")
+
+summary(lin_model) # Summary of lin model
+
+# Variables that are insignificant: Age, Cocaine, Crack, Sborder, ONLYMARIJ
+
+lm_pred = predict(lin_model,test)
+lm_rmse = RMSE(lm_pred, test$TOTPRISN)
+lm_rmse
+
+# Residual Plots
+lm_resid <- residuals(lin_model)
+plot(train$NODRUG, lm_resid,ylab="Residuals", xlab="# of Drugs", main="Residual Plot")
+plot(train$BLACK, lm_resid,ylab="Residuals", xlab="Black", main="Residual Plot")
+plot(train$WHITE, lm_resid,ylab="Residuals", xlab="White", main="Residual Plot")
+plot(train$NUMDEPEN, lm_resid,ylab="Residuals", xlab="# of Dependants", main="Residual Plot")
+plot(train$XFOLSOR, lm_resid,ylab="Residuals", xlab="Offense Level", main="Residual Plot")
+```
+
+```{r}
+# Linear Regression Model Code (No Race Variable)
+
+# Linear Model
+lin_model_NR = train(TOTPRISN ~ ACCAP + CAROFFAP + CRIMHIST + NODRUG + NUMDEPEN + XFOLSOR + MARIJ + HEROIN + USCITIZEN + JURY + JUDGE + MEXICO + HS + SOMECOL + COLGRAD + BAIL + SENTYR, 
+                 data = train, 
+                 method = "lm")
+
+summary(lin_model_NR) # Summary of lin model
+
+lm_pred_NR = predict(lin_model_NR,test)
+lm_rmse_NR = RMSE(lm_pred_NR, test$TOTPRISN)
+lm_rmse_NR
+
+# Residual Plots
+lm_resid_NR <- residuals(lin_model_NR)
+plot(train$NODRUG, lm_resid_NR,ylab="Residuals", xlab="# of Drugs", main="Residual Plot")
+plot(train$BLACK, lm_resid_NR,ylab="Residuals", xlab="Black", main="Residual Plot")
+plot(train$WHITE, lm_resid_NR,ylab="Residuals", xlab="White", main="Residual Plot")
+plot(train$NUMDEPEN, lm_resid_NR,ylab="Residuals", xlab="# of Dependants", main="Residual Plot")
+plot(train$XFOLSOR, lm_resid_NR,ylab="Residuals", xlab="Offense Level", main="Residual Plot")
+```
+
+```{r}
+# Random Forest Regression Model Code
+
+start = Sys.time()
+
+# Train control 
+trctrl = trainControl(method = "oob")
+
+rf_model = train(TOTPRISN ~ ACCAP + AGE + CAROFFAP + CRIMHIST + NODRUG + NUMDEPEN + XFOLSOR + MARIJ + COCAINE + HEROIN + CRACK + WHITE + BLACK + HISPAN + USCITIZEN + JURY + JUDGE + MEXICO + SBORDER + HS + SOMECOL + COLGRAD + BAIL + SENTYR, 
+                            data = train, 
+                            method = "rf",
+                            trControl = trctrl,
+                            tuneLength = 10,
+                            ntree = 80,
+                            importance = TRUE)
+
+plot(rf_model$results$mtry,rf_model$results$RMSE)
+
+#Examine importance of variables:
+Importance = varImp(rf_model)
+plot(Importance)
+
+# Accuracy on test data
+rf_pred = predict(rf_model,test)
+rf_rmse = RMSE(rf_pred,test$TOTPRISN)
+rf_rmse
+
+end = Sys.time()
+
+start- end
+
+# 40 trees = 38.5
+```
+
+```{r}
+# Random Forest Regression Model Code (No Race Variable)
+
+start = Sys.time()
+
+# Train control 
+trctrl = trainControl(method = "oob")
+
+rf_model_NR = train(TOTPRISN ~ ACCAP + AGE + CAROFFAP + CRIMHIST + NODRUG + NUMDEPEN + XFOLSOR + MARIJ + COCAINE + HEROIN + CRACK + USCITIZEN + JURY + JUDGE + MEXICO + SBORDER + HS + SOMECOL + COLGRAD + BAIL + SENTYR, 
+                            data = train, 
+                            method = "rf",
+                            trControl = trctrl,
+                            tuneLength = 10,
+                            ntree = 80,
+                            importance = TRUE)
+
+plot(rf_model_NR$results$mtry,rf_model$results$RMSE)
+
+#Examine importance of variables:
+Importance_NR = varImp(rf_model_NR)
+plot(Importance_NR)
+
+# Accuracy on test data
+rf_pred_NR = predict(rf_model_NR,test)
+rf_rmse_NR = RMSE(rf_pred_NR,test$TOTPRISN)
+rf_rmse_NR
+
+end = Sys.time()
+
+start- end
+```
+
+```{r}
+# Logistic Regression Model Code
+
+# Logistic Model
+log_model = train(as.factor(PRISDUM) ~ AGE + CAROFFAP + CRIMHIST + NUMDEPEN + XFOLSOR + MARIJ + COCAINE + HEROIN + CRACK + WHITE + HISPAN + USCITIZEN + JURY + MEXICO + SBORDER + HS + SOMECOL + COLGRAD + BAIL, 
+                 data = train, 
+                 method = "glm",
+                 family = "binomial")
+
+summary(log_model) # Summary of log model
+
+# Insignificant variables: ACCAP, JUDGE, NODRUG, BLACK, SENTYR
+
+# Create Predicted Probabilities
+predicted_probability = predict(log_model,
+                                newdata = test,
+                                type='prob')
+default_probability = predicted_probability[,2]
+
+
+# Create a confusion matrix to see how accurate our model is on data it has not seen
+delta = 0.50
+predicted_default = ifelse(default_probability >= delta,1,0) # Class prediction
+confusionMatrix(as.factor(predicted_default),as.factor(test$PRISDUM), positive='1') # Create confusion matrix
+```
+
+```{r}
+# Logistic Regression Model Code (No Race Variable)
+
+# Logistic Model
+log_model_NR = train(as.factor(PRISDUM) ~ AGE + CAROFFAP + CRIMHIST + NUMDEPEN + XFOLSOR + MARIJ + COCAINE + HEROIN + CRACK + WHITE + HISPAN + USCITIZEN + JURY + MEXICO + SBORDER + HS + SOMECOL + COLGRAD + BAIL, 
+                 data = train, 
+                 method = "glm",
+                 family = "binomial")
+
+summary(log_model_NR) # Summary of log model
+
+# Insignificant variables: ACCAP, JUDGE, NODRUG, BLACK, SENTYR
+
+# Create Predicted Probabilities
+predicted_probability_NR = predict(log_model_NR,
+                                newdata = test,
+                                type='prob')
+default_probability_NR = predicted_probability_NR[,2]
+
+
+# Create a confusion matrix to see how accurate our model is on data it has not seen
+delta = 0.50
+predicted_default_NR = ifelse(default_probability_NR >= delta,1,0) # Class prediction
+confusionMatrix(as.factor(predicted_default_NR),as.factor(test$PRISDUM), positive='1') # Create confusion matrix
+```
+
+```{r}
+# Random Forest Classification Model Code
+
+start = Sys.time()
+
+# Train control 
+trctrl = trainControl(method = "oob")
+
+rf_model_c = train(as.factor(PRISDUM) ~ ACCAP + AGE + CAROFFAP + CRIMHIST + NODRUG + NUMDEPEN + XFOLSOR + MARIJ + COCAINE + HEROIN + CRACK + WHITE + BLACK + HISPAN + USCITIZEN + JURY + JUDGE + MEXICO + SBORDER + HS + SOMECOL + COLGRAD + BAIL, 
+                            data = train, 
+                            method = "rf",
+                            trControl = trctrl,
+                            tuneLength = 10,
+                            ntree = 20,
+                            importance = TRUE)
+
+plot(rf_model_c$results$mtry,rf_model_c$results$Accuracy)
+
+# Examine importance of variables:
+Importance2 = varImp(rf_model_c)
+plot(Importance2)
+
+# Create Predicted Probabilities
+predicted_probability2 = predict(rf_model_c,
+                                newdata = test,
+                                type='prob')
+default_probability2 = predicted_probability2[,2]
+
+
+# Create a confusion matrix to see how accurate our model is on data it has not seen
+delta = 0.50
+predicted_default2 = ifelse(default_probability2 >= delta,1,0) # Class prediction
+confusionMatrix(as.factor(predicted_default2),as.factor(test$PRISDUM), positive='1') # Create confusion matrix
+
+end = Sys.time()
+
+start - end
+```
+
+```{r}
+# Random Forest Classification Model Code (No Race Variable)
+
+start = Sys.time()
+
+# Train control 
+trctrl = trainControl(method = "oob")
+
+rf_model_c_NR = train(as.factor(PRISDUM) ~ ACCAP + AGE + CAROFFAP + CRIMHIST + NODRUG + NUMDEPEN + XFOLSOR + MARIJ + COCAINE + HEROIN + CRACK + USCITIZEN + JURY + JUDGE + MEXICO + SBORDER + HS + SOMECOL + COLGRAD + BAIL, 
+                            data = train, 
+                            method = "rf",
+                            trControl = trctrl,
+                            tuneLength = 10,
+                            ntree = 20,
+                            importance = TRUE)
+
+plot(rf_model_c_NR$results$mtry,rf_model_c_NR$results$Accuracy)
+
+# Examine importance of variables:
+Importance2_NR = varImp(rf_model_c_NR)
+plot(Importance2_NR)
+
+# Create Predicted Probabilities
+predicted_probability2_NR = predict(rf_model_c_NR,
+                                newdata = test,
+                                type='prob')
+default_probability2_NR = predicted_probability2_NR[,2]
+
+
+# Create a confusion matrix to see how accurate our model is on data it has not seen
+delta = 0.50
+predicted_default2_NR = ifelse(default_probability2_NR >= delta,1,0) # Class prediction
+confusionMatrix(as.factor(predicted_default2_NR),as.factor(test$PRISDUM), positive='1') # Create confusion matrix
+
+end = Sys.time()
+
+start - end
+```
+
+```{r}
+rm(test)
+```
+
+```{r}
+
+```
+
