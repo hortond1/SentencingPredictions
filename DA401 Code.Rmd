@@ -7,7 +7,7 @@ output: html_document
 
 ```{r setup, include=FALSE}
 # Reading in libraries
-#install.packages('tidyverse')
+#install.packages('lm.beta')
 
 library(tidyverse)
 library(caret)
@@ -15,6 +15,8 @@ library(knitr)
 library(haven)
 library(readr)
 library(rpart.plot)
+library(QuantPsyc)
+library(lm.beta)
 ```
 
 ```{r}
@@ -301,41 +303,58 @@ yearlycount <- distinct(yearlycount, USSCIDN, .keep_all = TRUE)
 length(unique(yearlycount$USSCIDN))
 sentyears <- as.data.frame(table(yearlycount$SENTYR))
 
-
+# Figure 1
 ggplot(data = sentyears[2:15,], aes(x=Var1,y=Freq, group = 1))+
   geom_line()+
   geom_point(color='red')+
   xlab('Year')+
-  ylab('# of Sentences')+
-  ggtitle('Number of Sentences per Year')+
+  ylab('# of Cases')+
+  ggtitle('Number of Cases per Year')+
   theme(plot.title = element_text(hjust = 0.5))
 
 rm(df2005,df2006,df2007,df2008,df2009,df2010,df2011,df2012,df2013,df2018,df2019,df14151617,yearlycount)
 
 # Visual of drug offenses
 
+# Figure 3
+ggplot(drugdata,aes(x=SENTYR, group = as.factor(NEWRACE), color = as.factor(NEWRACE))) + 
+  geom_line(stat='count')+
+  geom_point(stat='count')+
+  xlab('Year')+
+  ylab('# of Cases')+
+  ggtitle('Number of Drug Cases per Year by Race')+
+  theme(plot.title = element_text(hjust = 0.5))+
+  theme(legend.title = element_blank())+
+  scale_color_hue(labels = c("White", "Black", "Hispanic","Other","NA"))
+
+# Figure 2
 drugdatafreq <- as.data.frame(table(drugdata$SENTYR))
 ggplot(data = drugdatafreq[2:5,], aes(x=Var1,y=Freq, group = 1))+
   geom_line()+
   geom_point(color='red')+
   xlab('Year')+
-  ylab('# of Sentences')+
-  ggtitle('Number of Drug Sentences per Year')+
+  ylab('# of Cases')+
+  ggtitle('Number of Drug Cases per Year')+
   theme(plot.title = element_text(hjust = 0.5))
 
-# Visual of differences in sentence and guideline minimums
-
-boxplot(MNTHDEPT ~ NEWRACE, data = wbdrug)
-
-hist(modeldata$TOTPRISN)
+# Figure 4
+modeldata$NEWRACE[modeldata$NEWRACE == 6] <- 4
+ggplot(data=modeldata, aes(x=NEWRACE, y=TOTPRISN, group = NEWRACE))+
+  geom_boxplot()+
+  xlab('Race')+
+  ylab('Prison Sentence Length')+
+  ggtitle('Prison Sentence Lengths by Race')+
+  theme(plot.title = element_text(hjust = 0.5))+
+  scale_x_continuous(breaks = c(1,2,3,4),labels=c("White", "Black", "Hispanic","Other"))
 ```
 
 ```{r}
-# Creating model datasets
+# Creating model datasets (Train and Test)
 
-modeldata <- drugdata[c(1:2,8:13,16,32:33,35:36,39:40,42,46,49,53,56:74)]
+modeldata <- drugdata[c(1:2,8:13,16,31:33,35:36,39:40,42,46,49,53,56:74)]
 modeldata$TOTPRISN[modeldata$TOTPRISN>1200] <- NA
 modeldata <- na.exclude(modeldata)
+modeldata <- rename(modeldata, 'FEMALE' = 'MONSEX')
 set.seed(1)
 part = createDataPartition(modeldata$TOTPRISN, p = 0.7, list=FALSE)
 train = modeldata[part,]
@@ -346,17 +365,24 @@ test = modeldata[-part,]
 # Linear Regression Model Code
 
 # Linear Model
-lin_model = train(TOTPRISN ~ ACCAP + CAROFFAP + CRIMHIST + NODRUG + NUMDEPEN + XFOLSOR + MARIJ + HEROIN + WHITE + BLACK + HISPAN + USCITIZEN + JURY + JUDGE + MEXICO + HS + SOMECOL + COLGRAD + BAIL + SENTYR, 
+lin_model = train(TOTPRISN ~ ACCAP + CAROFFAP + CRIMHIST + NODRUG + NUMDEPEN + XFOLSOR + MARIJ + HEROIN + WHITE + BLACK + USCITIZEN + JURY + JUDGE + MEXICO + HS + SOMECOL + COLGRAD + BAIL + SENTYR + FEMALE, 
                  data = train, 
                  method = "lm")
 
 summary(lin_model) # Summary of lin model
 
-# Variables that are insignificant: Age, Cocaine, Crack, Sborder, ONLYMARIJ
+# Same as LM above but will be an LM instead of a list to run beta regression
+lm <- lm(TOTPRISN ~ ACCAP + CAROFFAP + CRIMHIST + NODRUG + NUMDEPEN + XFOLSOR + MARIJ + HEROIN + WHITE + BLACK + USCITIZEN + JURY + JUDGE + MEXICO + HS + SOMECOL + COLGRAD + BAIL + SENTYR + FEMALE, 
+                 data = train)
+
+# Variables that are insignificant: Age, Cocaine, Crack, Sborder, ONLYMARIJ, HISPAN
 
 lm_pred = predict(lin_model,test)
 lm_rmse = RMSE(lm_pred, test$TOTPRISN)
 lm_rmse
+
+beta_lm <- lm.beta(lm)
+summary(beta_lm)
 
 # Residual Plots
 lm_resid <- residuals(lin_model)
@@ -371,15 +397,21 @@ plot(train$XFOLSOR, lm_resid,ylab="Residuals", xlab="Offense Level", main="Resid
 # Linear Regression Model Code (No Race Variable)
 
 # Linear Model
-lin_model_NR = train(TOTPRISN ~ ACCAP + CAROFFAP + CRIMHIST + NODRUG + NUMDEPEN + XFOLSOR + MARIJ + HEROIN + USCITIZEN + JURY + JUDGE + MEXICO + HS + SOMECOL + COLGRAD + BAIL + SENTYR, 
+lin_model_NR = train(TOTPRISN ~ ACCAP + CAROFFAP + CRIMHIST + NODRUG + NUMDEPEN + XFOLSOR + MARIJ + HEROIN + USCITIZEN + JURY + JUDGE + MEXICO + HS + SOMECOL + COLGRAD + BAIL + SENTYR + FEMALE, 
                  data = train, 
                  method = "lm")
 
 summary(lin_model_NR) # Summary of lin model
 
+lm_NR <- lm(TOTPRISN ~ ACCAP + CAROFFAP + CRIMHIST + NODRUG + NUMDEPEN + XFOLSOR + MARIJ + HEROIN + USCITIZEN + JURY + JUDGE + MEXICO + HS + SOMECOL + COLGRAD + BAIL + SENTYR + FEMALE, 
+                 data = train)
+
 lm_pred_NR = predict(lin_model_NR,test)
 lm_rmse_NR = RMSE(lm_pred_NR, test$TOTPRISN)
 lm_rmse_NR
+
+beta_lm_NR <- lm.beta(lm_NR)
+summary(beta_lm_NR)
 
 # Residual Plots
 lm_resid_NR <- residuals(lin_model_NR)
@@ -398,7 +430,7 @@ start = Sys.time()
 # Train control 
 trctrl = trainControl(method = "oob")
 
-rf_model = train(TOTPRISN ~ ACCAP + AGE + CAROFFAP + CRIMHIST + NODRUG + NUMDEPEN + XFOLSOR + MARIJ + COCAINE + HEROIN + CRACK + WHITE + BLACK + HISPAN + USCITIZEN + JURY + JUDGE + MEXICO + SBORDER + HS + SOMECOL + COLGRAD + BAIL + SENTYR, 
+rf_model = train(TOTPRISN ~ ACCAP + AGE + CAROFFAP + CRIMHIST + NODRUG + NUMDEPEN + XFOLSOR + MARIJ + COCAINE + HEROIN + CRACK + WHITE + BLACK + HISPAN + USCITIZEN + JURY + JUDGE + MEXICO + SBORDER + HS + SOMECOL + COLGRAD + BAIL + SENTYR + FEMALE, 
                             data = train, 
                             method = "rf",
                             trControl = trctrl,
@@ -432,7 +464,7 @@ start = Sys.time()
 # Train control 
 trctrl = trainControl(method = "oob")
 
-rf_model_NR = train(TOTPRISN ~ ACCAP + AGE + CAROFFAP + CRIMHIST + NODRUG + NUMDEPEN + XFOLSOR + MARIJ + COCAINE + HEROIN + CRACK + USCITIZEN + JURY + JUDGE + MEXICO + SBORDER + HS + SOMECOL + COLGRAD + BAIL + SENTYR, 
+rf_model_NR = train(TOTPRISN ~ ACCAP + AGE + CAROFFAP + CRIMHIST + NODRUG + NUMDEPEN + XFOLSOR + MARIJ + COCAINE + HEROIN + CRACK + USCITIZEN + JURY + JUDGE + MEXICO + SBORDER + HS + SOMECOL + COLGRAD + BAIL + SENTYR + FEMALE, 
                             data = train, 
                             method = "rf",
                             trControl = trctrl,
@@ -460,7 +492,7 @@ start- end
 # Logistic Regression Model Code
 
 # Logistic Model
-log_model = train(as.factor(PRISDUM) ~ AGE + CAROFFAP + CRIMHIST + NUMDEPEN + XFOLSOR + MARIJ + COCAINE + HEROIN + CRACK + WHITE + HISPAN + USCITIZEN + JURY + MEXICO + SBORDER + HS + SOMECOL + COLGRAD + BAIL, 
+log_model = train(as.factor(PRISDUM) ~ AGE + CRIMHIST + NUMDEPEN + XFOLSOR + MARIJ + COCAINE + HEROIN + CRACK + WHITE + HISPAN + USCITIZEN + JURY + MEXICO + SBORDER + HS + SOMECOL + COLGRAD + BAIL + FEMALE, 
                  data = train, 
                  method = "glm",
                  family = "binomial")
@@ -486,14 +518,12 @@ confusionMatrix(as.factor(predicted_default),as.factor(test$PRISDUM), positive='
 # Logistic Regression Model Code (No Race Variable)
 
 # Logistic Model
-log_model_NR = train(as.factor(PRISDUM) ~ AGE + CAROFFAP + CRIMHIST + NUMDEPEN + XFOLSOR + MARIJ + COCAINE + HEROIN + CRACK + WHITE + HISPAN + USCITIZEN + JURY + MEXICO + SBORDER + HS + SOMECOL + COLGRAD + BAIL, 
+log_model_NR = train(as.factor(PRISDUM) ~ AGE + CRIMHIST + NUMDEPEN + XFOLSOR + MARIJ + COCAINE + HEROIN + CRACK + USCITIZEN + JURY + MEXICO + SBORDER + HS + SOMECOL + COLGRAD + BAIL + FEMALE, 
                  data = train, 
                  method = "glm",
                  family = "binomial")
 
 summary(log_model_NR) # Summary of log model
-
-# Insignificant variables: ACCAP, JUDGE, NODRUG, BLACK, SENTYR
 
 # Create Predicted Probabilities
 predicted_probability_NR = predict(log_model_NR,
@@ -516,12 +546,12 @@ start = Sys.time()
 # Train control 
 trctrl = trainControl(method = "oob")
 
-rf_model_c = train(as.factor(PRISDUM) ~ ACCAP + AGE + CAROFFAP + CRIMHIST + NODRUG + NUMDEPEN + XFOLSOR + MARIJ + COCAINE + HEROIN + CRACK + WHITE + BLACK + HISPAN + USCITIZEN + JURY + JUDGE + MEXICO + SBORDER + HS + SOMECOL + COLGRAD + BAIL, 
+rf_model_c = train(as.factor(PRISDUM) ~ ACCAP + AGE + CAROFFAP + CRIMHIST + NODRUG + NUMDEPEN + XFOLSOR + MARIJ + COCAINE + HEROIN + CRACK + WHITE + BLACK + HISPAN + USCITIZEN + JURY + JUDGE + MEXICO + SBORDER + HS + SOMECOL + COLGRAD + BAIL + FEMALE, 
                             data = train, 
                             method = "rf",
                             trControl = trctrl,
                             tuneLength = 10,
-                            ntree = 20,
+                            ntree = 100,
                             importance = TRUE)
 
 plot(rf_model_c$results$mtry,rf_model_c$results$Accuracy)
@@ -555,12 +585,12 @@ start = Sys.time()
 # Train control 
 trctrl = trainControl(method = "oob")
 
-rf_model_c_NR = train(as.factor(PRISDUM) ~ ACCAP + AGE + CAROFFAP + CRIMHIST + NODRUG + NUMDEPEN + XFOLSOR + MARIJ + COCAINE + HEROIN + CRACK + USCITIZEN + JURY + JUDGE + MEXICO + SBORDER + HS + SOMECOL + COLGRAD + BAIL, 
+rf_model_c_NR = train(as.factor(PRISDUM) ~ ACCAP + AGE + CAROFFAP + CRIMHIST + NODRUG + NUMDEPEN + XFOLSOR + MARIJ + COCAINE + HEROIN + CRACK + USCITIZEN + JURY + JUDGE + MEXICO + SBORDER + HS + SOMECOL + COLGRAD + BAIL + FEMALE, 
                             data = train, 
                             method = "rf",
                             trControl = trctrl,
                             tuneLength = 10,
-                            ntree = 20,
+                            ntree = 100,
                             importance = TRUE)
 
 plot(rf_model_c_NR$results$mtry,rf_model_c_NR$results$Accuracy)
@@ -587,10 +617,5 @@ start - end
 ```
 
 ```{r}
-rm(test)
+write.csv(drugdata, "C:/Users/drake/Documents/Denison University/4. Senior Year/First Semester/Seminar in Data Analytics/Data/Drugdata.csv")
 ```
-
-```{r}
-
-```
-
